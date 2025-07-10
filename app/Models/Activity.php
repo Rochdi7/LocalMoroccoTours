@@ -5,6 +5,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
+use Spatie\MediaLibrary\MediaCollections\Models\Media;
+use Spatie\Image\Manipulations;
 
 class Activity extends Model implements HasMedia
 {
@@ -26,30 +28,32 @@ class Activity extends Model implements HasMedia
         'category_id',
         'location_id',
         'languages',
-        'gallery',
         'included',
         'excluded',
         'itinerary',
     ];
 
     protected $casts = [
-        'gallery' => 'array',
-        'included' => 'array',
-        'excluded' => 'array',
-        'itinerary' => 'array',
-        'highlights' => 'array',
-        'languages' => 'array',
+        'included'    => 'array',
+        'excluded'    => 'array',
+        'itinerary'   => 'array',
+        'highlights'  => 'array',
+        'languages'   => 'array',
+        'bestseller_flag' => 'boolean',
+        'free_cancellation_flag' => 'boolean',
     ];
 
     protected $attributes = [
-        'included' => '[]',
-        'excluded' => '[]',
-        'gallery' => '[]',
-        'itinerary' => '[]',
+        'included'   => '[]',
+        'excluded'   => '[]',
+        'itinerary'  => '[]',
         'highlights' => '[]',
-        'languages' => '[]',
+        'languages'  => '[]',
     ];
 
+    /**
+     * Relationships
+     */
     public function category()
     {
         return $this->belongsTo(ActivityCategory::class, 'category_id');
@@ -60,22 +64,55 @@ class Activity extends Model implements HasMedia
         return $this->belongsTo(\App\Models\Location::class, 'location_id');
     }
 
-    public function registerMediaCollections(): void
+    public function reviews()
     {
-        $this->addMediaCollection('cover')->singleFile();
-        $this->addMediaCollection('gallery');
+        return $this->morphMany(\App\Models\Review::class, 'reviewable');
     }
 
-    public function getLanguagesFormattedAttribute()
+    /**
+     * Media collections
+     */
+    public function registerMediaCollections(): void
+    {
+        $this->addMediaCollection('cover')
+            ->singleFile()
+            ->useDisk('public');
+
+        $this->addMediaCollection('gallery')
+            ->useDisk('public');
+    }
+
+    /**
+     * Media conversions
+     */
+    public function registerMediaConversions(Media $media = null): void
+    {
+        $this->addMediaConversion('thumb')
+            ->width(150)
+            ->height(150)
+            ->sharpen(10)
+            ->nonQueued();
+
+        $this->addMediaConversion('slider')
+            ->width(1200)
+            ->height(800)
+            ->sharpen(10)
+            ->nonQueued();
+    }
+
+    /**
+     * Accessors
+     */
+
+    public function getLanguagesFormattedAttribute(): string
     {
         if (is_array($this->languages) && count($this->languages) > 0) {
             return implode(', ', $this->languages);
         }
-
-        return 'English'; // default fallback
+        return 'English';
     }
 
-    public function getHighlightsArrayAttribute()
+    public function getHighlightsArrayAttribute(): array
     {
         if (empty($this->highlights)) {
             return [];
@@ -89,10 +126,5 @@ class Activity extends Model implements HasMedia
             preg_split('/\r\n|\r|\n/', $this->highlights),
             fn($line) => trim($line) !== ''
         );
-    }
-
-    public function reviews()
-    {
-        return $this->morphMany(\App\Models\Review::class, 'reviewable');
     }
 }
