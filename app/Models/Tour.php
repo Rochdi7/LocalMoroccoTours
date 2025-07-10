@@ -5,6 +5,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
+use Spatie\MediaLibrary\MediaCollections\Models\Media;
+use Spatie\Image\Manipulations;
 
 class Tour extends Model implements HasMedia
 {
@@ -33,15 +35,16 @@ class Tour extends Model implements HasMedia
     ];
 
     protected $casts = [
-        'gallery' => 'array',
-        'included' => 'array',
-        'excluded' => 'array',
-        'itinerary' => 'array',
-        'languages' => 'array',
+        'gallery'    => 'array',
+        'included'   => 'array',
+        'excluded'   => 'array',
+        'itinerary'  => 'array',
+        'languages'  => 'array',
     ];
 
-    
-    // Ensure highlights always returns an array
+    /**
+     * Ensure highlights always returns an array
+     */
     public function getHighlightsArrayAttribute()
     {
         $val = $this->highlights;
@@ -61,7 +64,9 @@ class Tour extends Model implements HasMedia
         );
     }
 
-
+    /**
+     * Return languages as a formatted string
+     */
     public function getLanguagesFormattedAttribute()
     {
         $lang = $this->languages;
@@ -81,14 +86,42 @@ class Tour extends Model implements HasMedia
         return $this->belongsTo(Location::class, 'location_id');
     }
 
-    public function registerMediaCollections(): void
-    {
-        $this->addMediaCollection('cover')->singleFile();
-        $this->addMediaCollection('gallery');
-    }
-
     public function reviews()
     {
         return $this->morphMany(Review::class, 'reviewable');
+    }
+
+    /**
+     * Register media collections
+     */
+    public function registerMediaCollections(): void
+    {
+        $this->addMediaCollection('gallery')
+            ->acceptsFile(function ($file) {
+                return in_array($file->mimeType, [
+                    'image/jpeg',
+                    'image/png',
+                    'image/webp',
+                ]);
+            })
+            ->useDisk('public');
+    }
+
+    /**
+     * Register media conversions
+     */
+    public function registerMediaConversions(Media $media = null): void
+    {
+        $this->addMediaConversion('thumb')
+            ->width(150)
+            ->height(150)
+            ->sharpen(10)
+            ->nonQueued();
+
+        $this->addMediaConversion('slider')
+            ->width(1200)
+            ->height(800)
+            ->sharpen(10)
+            ->nonQueued();
     }
 }
