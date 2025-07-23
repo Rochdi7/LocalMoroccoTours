@@ -6,7 +6,6 @@ use Illuminate\Database\Eloquent\Model;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
-use Spatie\Image\Manipulations;
 
 class Activity extends Model implements HasMedia
 {
@@ -30,30 +29,24 @@ class Activity extends Model implements HasMedia
         'languages',
         'included',
         'excluded',
-        'itinerary',
     ];
 
     protected $casts = [
-        'included'    => 'array',
-        'excluded'    => 'array',
-        'itinerary'   => 'array',
-        'highlights'  => 'array',
-        'languages'   => 'array',
+        'included' => 'array',
+        'excluded' => 'array',
+        'highlights' => 'array',
+        'languages' => 'array',
         'bestseller_flag' => 'boolean',
         'free_cancellation_flag' => 'boolean',
     ];
 
     protected $attributes = [
-        'included'   => '[]',
-        'excluded'   => '[]',
-        'itinerary'  => '[]',
+        'included' => '[]',
+        'excluded' => '[]',
         'highlights' => '[]',
-        'languages'  => '[]',
+        'languages' => '[]',
     ];
 
-    /**
-     * Relationships
-     */
     public function category()
     {
         return $this->belongsTo(ActivityCategory::class, 'category_id');
@@ -61,17 +54,19 @@ class Activity extends Model implements HasMedia
 
     public function location()
     {
-        return $this->belongsTo(\App\Models\Location::class, 'location_id');
+        return $this->belongsTo(Location::class, 'location_id');
     }
 
     public function reviews()
     {
-        return $this->morphMany(\App\Models\Review::class, 'reviewable');
+        return $this->morphMany(Review::class, 'reviewable');
     }
 
-    /**
-     * Media collections
-     */
+    public function itineraries()
+    {
+        return $this->morphMany(Itinerary::class, 'itineraryable');
+    }
+
     public function registerMediaCollections(): void
     {
         $this->addMediaCollection('cover')
@@ -82,9 +77,6 @@ class Activity extends Model implements HasMedia
             ->useDisk('public');
     }
 
-    /**
-     * Media conversions
-     */
     public function registerMediaConversions(Media $media = null): void
     {
         $this->addMediaConversion('thumb')
@@ -99,10 +91,6 @@ class Activity extends Model implements HasMedia
             ->sharpen(10)
             ->nonQueued();
     }
-
-    /**
-     * Accessors
-     */
 
     public function getLanguagesFormattedAttribute(): string
     {

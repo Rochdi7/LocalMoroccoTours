@@ -7,6 +7,7 @@ use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 use Spatie\Image\Manipulations;
+use App\Models\Itinerary;
 
 class Trekking extends Model implements HasMedia
 {
@@ -52,6 +53,11 @@ class Trekking extends Model implements HasMedia
     {
         return $this->belongsTo(TrekkingCategory::class, 'category_id');
     }
+    public function itineraries()
+{
+    return $this->morphMany(Itinerary::class, 'itineraryable');
+}
+
 
     /**
      * Get the location for the trekking.

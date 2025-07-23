@@ -6,7 +6,6 @@ use Illuminate\Database\Eloquent\Model;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
-use Spatie\Image\Manipulations;
 
 class Tour extends Model implements HasMedia
 {
@@ -15,6 +14,7 @@ class Tour extends Model implements HasMedia
     protected $fillable = [
         'title',
         'slug',
+        'type',
         'overview',
         'highlights',
         'duration',
@@ -27,19 +27,18 @@ class Tour extends Model implements HasMedia
         'map_frame',
         'category_id',
         'location_id',
-        'gallery',
         'included',
         'excluded',
-        'itinerary',
         'languages',
     ];
 
     protected $casts = [
-        'gallery'    => 'array',
-        'included'   => 'array',
-        'excluded'   => 'array',
-        'itinerary'  => 'array',
-        'languages'  => 'array',
+        'included' => 'array',
+        'excluded' => 'array',
+        'itinerary' => 'array',
+        'languages' => 'array',
+        'bestseller_flag' => 'boolean',
+        'free_cancellation_flag' => 'boolean',
     ];
 
     /**
@@ -64,22 +63,17 @@ class Tour extends Model implements HasMedia
         );
     }
 
-    /**
-     * Return languages as a formatted string
-     */
-    public function getLanguagesFormattedAttribute()
-    {
-        $lang = $this->languages;
-        if (is_array($lang) && count($lang) > 0) {
-            return implode(', ', $lang);
-        }
-        return 'English';
-    }
-
     public function category()
     {
         return $this->belongsTo(TourCategory::class, 'category_id');
     }
+
+    public function itineraries()
+    {
+        return $this->morphMany(Itinerary::class, 'itineraryable')->orderBy('day_number');
+    }
+
+
 
     public function location()
     {
@@ -91,11 +85,28 @@ class Tour extends Model implements HasMedia
         return $this->morphMany(Review::class, 'reviewable');
     }
 
+    public function getLanguagesFormattedAttribute()
+    {
+        $langs = json_decode($this->languages, true);
+
+        if (is_array($langs)) {
+            return implode(', ', $langs);
+        }
+
+        return $this->languages;
+    }
+
     /**
      * Register media collections
      */
     public function registerMediaCollections(): void
     {
+        // Cover image collection (single file)
+        $this->addMediaCollection('cover')
+            ->singleFile()
+            ->useDisk('public');
+
+        // Gallery collection (multiple images)
         $this->addMediaCollection('gallery')
             ->acceptsFile(function ($file) {
                 return in_array($file->mimeType, [
