@@ -13,12 +13,18 @@ class ProfileController extends Controller
         $this->middleware(['auth', 'verified']);
     }
 
+    /**
+     * Show profile page
+     */
     public function index()
     {
         $user = Auth::user();
         return view('profile.index', compact('user'));
     }
 
+    /**
+     * Update profile information
+     */
     public function update(Request $request)
     {
         $user = Auth::user();
@@ -36,9 +42,7 @@ class ProfileController extends Controller
         $user->address = $request->address;
         $user->bio = $request->bio;
 
-        // 🧼 Remove MediaLibrary usage if not used in your project
         if ($request->hasFile('profile_photo')) {
-            // Store uploaded file manually
             $path = $request->file('profile_photo')->store('profile_photos', 'public');
             $user->photo = $path;
         }
@@ -48,6 +52,9 @@ class ProfileController extends Controller
         return redirect()->route('profile.index')->with('success', 'Profile updated successfully.');
     }
 
+    /**
+     * Update user password
+     */
     public function updatePassword(Request $request)
     {
         $request->validate([

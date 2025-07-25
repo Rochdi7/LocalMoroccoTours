@@ -8,12 +8,14 @@ use App\Models\TourCategory;
 use App\Models\Location;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use App\Models\Itinerary;
+use Illuminate\Support\Facades\DB;
 
 class TourController extends Controller
 {
     public function index()
     {
-        $tours = Tour::with(['category', 'location'])->paginate(10);
+        $tours = Tour::with(['category', 'location', 'media'])->paginate(10);
         return view('admin.tours.index', compact('tours'));
     }
 
@@ -21,18 +23,20 @@ class TourController extends Controller
     {
         $categories = TourCategory::all();
         $locations = Location::all();
-        return view('admin.tours.create', compact('categories', 'locations'));
+        $types = ['day_trip' => 'Day Trip', 'multi_day' => 'Multi-Day Tour'];
+        return view('admin.tours.create', compact('categories', 'locations', 'types'));
     }
 
     public function store(Request $request)
     {
         $validated = $request->validate([
+            'type' => 'required|in:day_trip,multi_day',
             'title' => 'required|string|max:255',
             'overview' => 'required',
             'duration' => 'required|string|max:255',
             'group_size' => 'required|integer',
             'age_range' => 'required|string|max:50',
-            'base_price' => 'required|numeric',
+            'base_price' => 'nullable|numeric',
             'category_id' => 'required|exists:tour_categories,id',
             'location_id' => 'required|exists:locations,id',
             'bestseller_flag' => 'boolean',
@@ -42,83 +46,90 @@ class TourController extends Controller
             'languages' => 'nullable|string',
             'included' => 'nullable|string',
             'excluded' => 'nullable|string',
-            'itinerary' => 'nullable|string',
-            'gallery' => 'nullable|array',
+            'itinerary' => 'nullable|array',
+            'itinerary.*.title' => 'nullable|string|max:255',
+            'itinerary.*.content' => 'nullable|array',
+            'itinerary.*.content.*' => 'nullable|string|max:500',
             'gallery.*' => 'nullable|image|max:2048',
             'image' => 'nullable|image|max:2048',
+            'gallery_alt.*' => 'nullable|string|max:255',
+            'gallery_title.*' => 'nullable|string|max:255',
+            'gallery_caption.*' => 'nullable|string|max:255',
+            'gallery_description.*' => 'nullable|string',
+            'cover_alt' => 'nullable|string|max:255',
+            'cover_title' => 'nullable|string|max:255',
+            'cover_caption' => 'nullable|string|max:255',
+            'cover_description' => 'nullable|string',
         ]);
 
+        $validated['slug'] = $this->generateUniqueSlug($validated['title']);
         $validated['bestseller_flag'] = $request->has('bestseller_flag');
         $validated['free_cancellation_flag'] = $request->has('free_cancellation_flag');
+        $validated['type'] = $request->input('type', 'multi_day');
 
-        // Generate unique slug
-        $validated['slug'] = $this->generateUniqueSlug($validated['title']);
-
-        // Convert fields to arrays
-        $validated['languages'] = !empty($validated['languages'])
-            ? array_map('trim', explode(',', $validated['languages']))
-            : [];
-
-        foreach (['included', 'excluded'] as $field) {
-            if (!empty($validated[$field])) {
-                $validated[$field] = array_map(
-                    'trim',
-                    explode(',', $validated[$field])
-                );
-            } else {
-                $validated[$field] = [];
-            }
-        }
-
-        if (!empty($validated['itinerary'])) {
-            $validated['itinerary'] = array_filter(
-                array_map(
-                    'trim',
-                    preg_split('/\r\n|\r|\n/', $validated['itinerary'])
-                )
-            );
-        } else {
-            $validated['itinerary'] = [];
-        }
-
-        // Encode arrays to JSON
-        $validated['languages'] = json_encode($validated['languages']);
-        $validated['included'] = json_encode($validated['included']);
-        $validated['excluded'] = json_encode($validated['excluded']);
-        $validated['itinerary'] = json_encode($validated['itinerary']);
+        $validated['highlights'] = json_encode(array_filter(array_map('trim', explode(',', $validated['highlights'] ?? ''))));
+        $validated['languages'] = json_encode(array_filter(array_map('trim', explode(',', $validated['languages'] ?? ''))));
+        $validated['included'] = json_encode(array_filter(array_map('trim', explode(',', $validated['included'] ?? ''))));
+        $validated['excluded'] = json_encode(array_filter(array_map('trim', explode(',', $validated['excluded'] ?? ''))));
 
         $tour = Tour::create($validated);
 
+        // Save itinerary items
+        foreach ($request->itinerary as $index => $item) {
+    $tour->itineraries()->create([
+        'day_number' => $index + 1,
+        'title' => $item['title'] ?? '',
+        'content' => $item['content'] ? implode("\n", array_filter($item['content'])) : null,
+    ]);
+}
+
+
+
+        // Cover image
         if ($request->hasFile('image')) {
-            $tour->addMediaFromRequest('image')->toMediaCollection('cover');
+            $media = $tour->addMediaFromRequest('image')->toMediaCollection('cover');
+            $media->setCustomProperty('alt', $request->cover_alt ?? '');
+            $media->setCustomProperty('title', $request->cover_title ?? '');
+            $media->setCustomProperty('caption', $request->cover_caption ?? '');
+            $media->setCustomProperty('description', $request->cover_description ?? '');
+            $media->save();
         }
 
+        // Gallery
         if ($request->hasFile('gallery')) {
-            foreach ($request->file('gallery') as $galleryImage) {
-                $tour->addMedia($galleryImage)->toMediaCollection('gallery');
+            foreach ($request->file('gallery') as $index => $image) {
+                $media = $tour->addMedia($image)->toMediaCollection('gallery');
+                $media->setCustomProperty('alt', $request->gallery_alt[$index] ?? '');
+                $media->setCustomProperty('title', $request->gallery_title[$index] ?? '');
+                $media->setCustomProperty('caption', $request->gallery_caption[$index] ?? '');
+                $media->setCustomProperty('description', $request->gallery_description[$index] ?? '');
+                $media->save();
             }
         }
 
-        return redirect()->route('admin.tours.index')
-            ->with('success', 'Tour created successfully.');
+        return redirect()->route('admin.tours.index')->with('success', 'Tour created successfully.');
     }
+
 
     public function edit(Tour $tour)
     {
         $categories = TourCategory::all();
         $locations = Location::all();
-        return view('admin.tours.edit', compact('tour', 'categories', 'locations'));
+        $types = ['day_trip' => 'Day Trip', 'multi_day' => 'Multi-Day Tour'];
+        $itineraries = $tour->itineraries()->orderBy('day_number')->get();
+        return view('admin.tours.edit', compact('tour', 'categories', 'locations', 'types', 'itineraries'));
     }
 
     public function update(Request $request, Tour $tour)
     {
         $validated = $request->validate([
+            'type' => 'required|in:day_trip,multi_day',
             'title' => 'required|string|max:255',
             'overview' => 'required',
             'duration' => 'required|string|max:255',
             'group_size' => 'required|integer',
             'age_range' => 'required|string|max:50',
-            'base_price' => 'required|numeric',
+            'base_price' => 'nullable|numeric',
             'category_id' => 'required|exists:tour_categories,id',
             'location_id' => 'required|exists:locations,id',
             'bestseller_flag' => 'boolean',
@@ -128,14 +139,23 @@ class TourController extends Controller
             'languages' => 'nullable|string',
             'included' => 'nullable|string',
             'excluded' => 'nullable|string',
-            'itinerary' => 'nullable|string',
-            'gallery' => 'nullable|array',
+            'itinerary' => 'nullable|array',
+            'itinerary.*.title' => 'nullable|string|max:255',
+            'itinerary.*.content' => 'nullable|array',
+            'itinerary.*.content.*' => 'nullable|string|max:500',
             'gallery.*' => 'nullable|image|max:2048',
             'image' => 'nullable|image|max:2048',
+            'delete_gallery' => 'nullable|array',
+            'delete_gallery.*' => 'nullable|integer',
+            'gallery_alt.*' => 'nullable|string|max:255',
+            'gallery_title.*' => 'nullable|string|max:255',
+            'gallery_caption.*' => 'nullable|string|max:255',
+            'gallery_description.*' => 'nullable|string',
+            'cover_alt' => 'nullable|string|max:255',
+            'cover_title' => 'nullable|string|max:255',
+            'cover_caption' => 'nullable|string|max:255',
+            'cover_description' => 'nullable|string',
         ]);
-
-        $validated['bestseller_flag'] = $request->has('bestseller_flag');
-        $validated['free_cancellation_flag'] = $request->has('free_cancellation_flag');
 
         if ($tour->title !== $validated['title']) {
             $validated['slug'] = $this->generateUniqueSlug($validated['title']);
@@ -143,56 +163,87 @@ class TourController extends Controller
             $validated['slug'] = $tour->slug;
         }
 
-        // Convert fields to arrays
-        $validated['languages'] = !empty($validated['languages'])
-            ? array_map('trim', explode(',', $validated['languages']))
-            : [];
+        $validated['bestseller_flag'] = $request->has('bestseller_flag');
+        $validated['free_cancellation_flag'] = $request->has('free_cancellation_flag');
+        $validated['type'] = $request->input('type', 'multi_day');
 
-        foreach (['included', 'excluded'] as $field) {
-            if (!empty($validated[$field])) {
-                $validated[$field] = array_map(
-                    'trim',
-                    explode(',', $validated[$field])
-                );
-            } else {
-                $validated[$field] = [];
+        $validated['highlights'] = json_encode(array_filter(array_map('trim', explode(',', $validated['highlights'] ?? ''))));
+        $validated['languages'] = json_encode(array_filter(array_map('trim', explode(',', $validated['languages'] ?? ''))));
+        $validated['included'] = json_encode(array_filter(array_map('trim', explode(',', $validated['included'] ?? ''))));
+        $validated['excluded'] = json_encode(array_filter(array_map('trim', explode(',', $validated['excluded'] ?? ''))));
+
+        // Replace all itineraries
+        $tour->itineraries()->delete();
+
+        foreach ($request->itinerary as $index => $item) {
+    $tour->itineraries()->create([
+        'day_number' => $index + 1,
+        'title' => $item['title'] ?? '',
+        'content' => $item['content'] ? implode("\n", array_filter($item['content'])) : null,
+    ]);
+}
+
+
+        // Update existing cover metadata
+        $cover = $tour->getFirstMedia('cover');
+        if ($cover && !$request->hasFile('image')) {
+            $cover->setCustomProperty('alt', $request->input('existing_cover_alt', ''));
+            $cover->setCustomProperty('title', $request->input('existing_cover_title', ''));
+            $cover->setCustomProperty('caption', $request->input('existing_cover_caption', ''));
+            $cover->setCustomProperty('description', $request->input('existing_cover_description', ''));
+            $cover->save();
+        }
+
+        // Update gallery metadata
+        if ($request->filled('existing_gallery_alt')) {
+            foreach ($request->input('existing_gallery_alt') as $mediaId => $alt) {
+                $media = $tour->media()->find($mediaId);
+                if ($media) {
+                    $media->setCustomProperty('alt', $alt);
+                    $media->setCustomProperty('title', $request->input("existing_gallery_title.{$mediaId}", ''));
+                    $media->setCustomProperty('caption', $request->input("existing_gallery_caption.{$mediaId}", ''));
+                    $media->setCustomProperty('description', $request->input("existing_gallery_description.{$mediaId}", ''));
+                    $media->save();
+                }
             }
         }
 
-        if (!empty($validated['itinerary'])) {
-            $validated['itinerary'] = array_filter(
-                array_map(
-                    'trim',
-                    preg_split('/\r\n|\r|\n/', $validated['itinerary'])
-                )
-            );
-        } else {
-            $validated['itinerary'] = [];
-        }
-
-        // Encode arrays to JSON
-        $validated['languages'] = json_encode($validated['languages']);
-        $validated['included'] = json_encode($validated['included']);
-        $validated['excluded'] = json_encode($validated['excluded']);
-        $validated['itinerary'] = json_encode($validated['itinerary']);
-
-        $tour->update($validated);
-
+        // Replace cover image
         if ($request->hasFile('image')) {
             $tour->clearMediaCollection('cover');
-            $tour->addMediaFromRequest('image')->toMediaCollection('cover');
+            $media = $tour->addMediaFromRequest('image')->toMediaCollection('cover');
+            $media->setCustomProperty('alt', $request->cover_alt ?? '');
+            $media->setCustomProperty('title', $request->cover_title ?? '');
+            $media->setCustomProperty('caption', $request->cover_caption ?? '');
+            $media->setCustomProperty('description', $request->cover_description ?? '');
+            $media->save();
         }
 
-        if ($request->hasFile('gallery')) {
-            $tour->clearMediaCollection('gallery');
-            foreach ($request->file('gallery') as $galleryImage) {
-                $tour->addMedia($galleryImage)->toMediaCollection('gallery');
+        // Delete gallery items
+        if ($request->filled('delete_gallery')) {
+            foreach ($request->input('delete_gallery') as $mediaId) {
+                $mediaItem = $tour->media()->find($mediaId);
+                if ($mediaItem) {
+                    $mediaItem->delete();
+                }
             }
         }
 
-        return redirect()->route('admin.tours.index')
-            ->with('success', 'Tour updated successfully.');
+        // Add new gallery items
+        if ($request->hasFile('gallery')) {
+            foreach ($request->file('gallery') as $index => $image) {
+                $media = $tour->addMedia($image)->toMediaCollection('gallery');
+                $media->setCustomProperty('alt', $request->gallery_alt[$index] ?? '');
+                $media->setCustomProperty('title', $request->gallery_title[$index] ?? '');
+                $media->setCustomProperty('caption', $request->gallery_caption[$index] ?? '');
+                $media->setCustomProperty('description', $request->gallery_description[$index] ?? '');
+                $media->save();
+            }
+        }
+
+        return redirect()->route('admin.tours.index')->with('success', 'Tour updated successfully.');
     }
+
 
     public function destroy(Tour $tour)
     {
@@ -201,9 +252,6 @@ class TourController extends Controller
             ->with('success', 'Tour deleted.');
     }
 
-    /**
-     * Generate a unique slug for Tour
-     */
     private function generateUniqueSlug($title)
     {
         $slug = Str::slug($title);

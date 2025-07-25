@@ -13,93 +13,118 @@ class TrekkingController extends Controller
 {
     public function index()
     {
-        $treks = Trekking::with(['category', 'media'])->paginate(10);
+        $treks = Trekking::with(['category', 'location', 'media'])->paginate(10);
         return view('admin.trekking.index', compact('treks'));
     }
 
     public function create()
     {
         $categories = TrekkingCategory::all();
-        return view('admin.trekking.create', compact('categories'));
+        $locations = Location::all();
+        return view('admin.trekking.create', compact('categories', 'locations'));
     }
 
     public function store(Request $request)
-    {
-        $validated = $request->validate([
-            'title' => 'required|string|max:255',
-            'overview' => 'required',
-            'duration' => 'required|string|max:255',
-            'group_size' => 'required|integer',
-            'age_range' => 'required|string|max:50',
-            'base_price' => 'required|numeric',
-            'difficulty_level' => 'required|in:Easy,Moderate,Hard,Expert',
-            'max_altitude' => 'nullable|integer',
-            'category_id' => 'required|exists:trekking_categories,id',
-            'bestseller_flag' => 'boolean',
-            'free_cancellation_flag' => 'boolean',
-            'highlights' => 'nullable|string',
-            'languages' => 'nullable|string',
-            'map_frame' => 'nullable|string', // ✅ replaced map_coordinates
-            'included' => 'nullable|string',
-            'excluded' => 'nullable|string',
-            'itinerary' => 'nullable|string',
-            'image' => 'nullable|image|max:2048',
-        ]);
+{
+    $validated = $request->validate([
+        'title' => 'required|string|max:255',
+        'overview' => 'required',
+        'duration' => 'required|string|max:255',
+        'group_size' => 'required|integer',
+        'age_range' => 'required|string|max:50',
+        'base_price' => 'nullable|numeric',
+        'difficulty_level' => 'required|in:Easy,Moderate,Hard,Expert',
+        'max_altitude' => 'nullable|integer',
+        'category_id' => 'required|exists:trekking_categories,id',
+        'location_id' => 'nullable|exists:locations,id',
+        'bestseller_flag' => 'boolean',
+        'free_cancellation_flag' => 'boolean',
+        'highlights' => 'nullable|string',
+        'languages' => 'nullable|string',
+        'map_frame' => 'nullable|string',
+        'included' => 'nullable|string',
+        'excluded' => 'nullable|string',
+        'itinerary' => 'nullable|array',
+        'itinerary.*.title' => 'nullable|string|max:255',
+        'itinerary.*.content' => 'nullable|array',
+        'itinerary.*.content.*' => 'nullable|string',
 
-        $validated['slug'] = $this->generateUniqueSlug($validated['title']);
+        'gallery.*' => 'nullable|image|max:2048',
+        'image' => 'nullable|image|max:2048',
+        'gallery_alt.*' => 'nullable|string|max:255',
+        'gallery_title.*' => 'nullable|string|max:255',
+        'gallery_caption.*' => 'nullable|string|max:255',
+        'gallery_description.*' => 'nullable|string',
+        'cover_alt' => 'nullable|string|max:255',
+        'cover_title' => 'nullable|string|max:255',
+        'cover_caption' => 'nullable|string|max:255',
+        'cover_description' => 'nullable|string',
+    ]);
 
-        $validated['bestseller_flag'] = $request->has('bestseller_flag');
-        $validated['free_cancellation_flag'] = $request->has('free_cancellation_flag');
+    $validated['slug'] = $this->generateUniqueSlug($validated['title']);
+    $validated['bestseller_flag'] = $request->has('bestseller_flag');
+    $validated['free_cancellation_flag'] = $request->has('free_cancellation_flag');
 
-        // Highlights → array
-        $validated['highlights'] = !empty($validated['highlights'])
-            ? array_map('trim', explode(',', $validated['highlights']))
-            : [];
-
-        // Languages → array
-        $validated['languages'] = !empty($validated['languages'])
-            ? array_map('trim', explode(',', $validated['languages']))
-            : [];
-
-        // Included/Excluded → arrays
-        foreach (['included', 'excluded'] as $field) {
-            $validated[$field] = !empty($validated[$field])
-                ? array_map('trim', explode(',', $validated[$field]))
-                : [];
-        }
-
-        // Itinerary → array
-        $validated['itinerary'] = !empty($validated['itinerary'])
-            ? array_filter(
-                array_map(
-                    'trim',
-                    preg_split('/\r\n|\r|\n/', $validated['itinerary'])
-                )
-            )
-            : [];
-
-        // Encode arrays to JSON
-        $validated['highlights'] = json_encode($validated['highlights']);
-        $validated['languages'] = json_encode($validated['languages']);
-        $validated['included'] = json_encode($validated['included']);
-        $validated['excluded'] = json_encode($validated['excluded']);
-        $validated['itinerary'] = json_encode($validated['itinerary']);
-
-        $trek = Trekking::create($validated);
-
-        if ($request->hasFile('image')) {
-            $trek->addMediaFromRequest('image')->toMediaCollection('trekking');
-        }
-
-        return redirect()->route('admin.trekking.index')
-            ->with('success', 'Trekking created successfully.');
+    foreach (['highlights', 'languages', 'included', 'excluded'] as $field) {
+        $validated[$field] = !empty($validated[$field])
+            ? json_encode(array_map('trim', explode(',', $validated[$field])))
+            : json_encode([]);
     }
+
+    // remove itinerary before saving main Trekking
+    $itinerary = $request->input('itinerary', []);
+    unset($validated['itinerary']);
+
+    $trek = Trekking::create($validated);
+
+    // ✅ Save structured itinerary into `itineraries` table
+    foreach ($itinerary as $index => $day) {
+    if (!empty($day['title']) || !empty($day['content'])) {
+        \DB::table('itineraries')->insert([
+            'itineraryable_id' => $trek->id,
+            'itineraryable_type' => \App\Models\Trekking::class,
+            'day_number' => $index + 1,
+            'title' => $day['title'] ?? '',
+            'content' => is_array($day['content']) ? implode("\n\n", array_filter(array_map('trim', $day['content']))) : '',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+}
+
+
+    // ✅ Upload cover image
+    if ($request->hasFile('image')) {
+        $media = $trek->addMediaFromRequest('image')->toMediaCollection('cover');
+        $media->setCustomProperty('alt', $request->cover_alt ?? '');
+        $media->setCustomProperty('title', $request->cover_title ?? '');
+        $media->setCustomProperty('caption', $request->cover_caption ?? '');
+        $media->setCustomProperty('description', $request->cover_description ?? '');
+        $media->save();
+    }
+
+    // ✅ Upload gallery images
+    if ($request->hasFile('gallery')) {
+        foreach ($request->file('gallery') as $index => $image) {
+            $media = $trek->addMedia($image)->toMediaCollection('gallery');
+            $media->setCustomProperty('alt', $request->gallery_alt[$index] ?? '');
+            $media->setCustomProperty('title', $request->gallery_title[$index] ?? '');
+            $media->setCustomProperty('caption', $request->gallery_caption[$index] ?? '');
+            $media->setCustomProperty('description', $request->gallery_description[$index] ?? '');
+            $media->save();
+        }
+    }
+
+    return redirect()->route('admin.trekking.index')
+        ->with('success', 'Trekking created successfully.');
+}
+
 
     public function edit(Trekking $trekking)
     {
         $categories = TrekkingCategory::all();
-        $tour = $trekking;
         $locations = Location::all();
+        $tour = $trekking;
         return view('admin.trekking.edit', compact('trekking', 'categories', 'tour', 'locations'));
     }
 
@@ -111,19 +136,35 @@ class TrekkingController extends Controller
             'duration' => 'required|string|max:255',
             'group_size' => 'required|integer',
             'age_range' => 'required|string|max:50',
-            'base_price' => 'required|numeric',
+            'base_price' => 'nullable|numeric',
             'difficulty_level' => 'required|in:Easy,Moderate,Hard,Expert',
             'max_altitude' => 'nullable|integer',
             'category_id' => 'required|exists:trekking_categories,id',
+            'location_id' => 'nullable|exists:locations,id',
             'bestseller_flag' => 'boolean',
             'free_cancellation_flag' => 'boolean',
             'highlights' => 'nullable|string',
             'languages' => 'nullable|string',
-            'map_frame' => 'nullable|string', // ✅ replaced map_coordinates
+            'map_frame' => 'nullable|string',
             'included' => 'nullable|string',
             'excluded' => 'nullable|string',
-            'itinerary' => 'nullable|string',
+            'itinerary' => 'nullable|array',
+            'itinerary.*.title' => 'nullable|string|max:255',
+            'itinerary.*.content' => 'nullable|array',
+            'itinerary.*.content.*' => 'nullable|string',
+
+            'gallery.*' => 'nullable|image|max:2048',
             'image' => 'nullable|image|max:2048',
+            'delete_gallery' => 'nullable|array',
+            'delete_gallery.*' => 'nullable|integer',
+            'gallery_alt.*' => 'nullable|string|max:255',
+            'gallery_title.*' => 'nullable|string|max:255',
+            'gallery_caption.*' => 'nullable|string|max:255',
+            'gallery_description.*' => 'nullable|string',
+            'cover_alt' => 'nullable|string|max:255',
+            'cover_title' => 'nullable|string|max:255',
+            'cover_caption' => 'nullable|string|max:255',
+            'cover_description' => 'nullable|string',
         ]);
 
         if ($trekking->title !== $validated['title']) {
@@ -149,16 +190,14 @@ class TrekkingController extends Controller
                 : [];
         }
 
-        $validated['itinerary'] = !empty($validated['itinerary'])
-            ? array_filter(
-                array_map(
-                    'trim',
-                    preg_split('/\r\n|\r|\n/', $validated['itinerary'])
-                )
-            )
-            : [];
+        $validated['itinerary'] = $request->filled('itinerary') ? collect($request->itinerary)->map(function ($day) {
+            return [
+                'title' => trim($day['title'] ?? ''),
+                'content' => collect($day['content'] ?? [])->map(fn($c) => trim($c))->filter()->values()->all(),
+            ];
+        })->filter(fn($d) => $d['title'] || count($d['content']))->values()->all() : [];
 
-        // Encode arrays to JSON
+
         $validated['highlights'] = json_encode($validated['highlights']);
         $validated['languages'] = json_encode($validated['languages']);
         $validated['included'] = json_encode($validated['included']);
@@ -167,13 +206,54 @@ class TrekkingController extends Controller
 
         $trekking->update($validated);
 
+        if ($request->filled('existing_gallery_ids')) {
+            foreach ($request->input('existing_gallery_ids') as $id) {
+                $media = $trekking->media()->find($id);
+                if ($media) {
+                    $media->setCustomProperty('alt', $request->input("existing_gallery_alt.$id", ''));
+                    $media->setCustomProperty('title', $request->input("existing_gallery_title.$id", ''));
+                    $media->setCustomProperty('caption', $request->input("existing_gallery_caption.$id", ''));
+                    $media->setCustomProperty('description', $request->input("existing_gallery_description.$id", ''));
+                    $media->save();
+                }
+            }
+        }
+
         if ($request->hasFile('image')) {
-            $trekking->clearMediaCollection('trekking');
-            $trekking->addMediaFromRequest('image')->toMediaCollection('trekking');
+            $trekking->clearMediaCollection('cover');
+
+            $media = $trekking->addMediaFromRequest('image')->toMediaCollection('cover');
+
+            $media->setCustomProperty('alt', $request->cover_alt ?? '');
+            $media->setCustomProperty('title', $request->cover_title ?? '');
+            $media->setCustomProperty('caption', $request->cover_caption ?? '');
+            $media->setCustomProperty('description', $request->cover_description ?? '');
+            $media->save();
+        }
+
+        if ($request->filled('delete_gallery')) {
+            foreach ($request->input('delete_gallery') as $mediaId) {
+                $mediaItem = $trekking->media()->find($mediaId);
+                if ($mediaItem) {
+                    $mediaItem->delete();
+                }
+            }
+        }
+
+        if ($request->hasFile('gallery')) {
+            foreach ($request->file('gallery') as $index => $file) {
+                $media = $trekking->addMedia($file)->toMediaCollection('gallery');
+
+                $media->setCustomProperty('alt', $request->gallery_alt[$index] ?? '');
+                $media->setCustomProperty('title', $request->gallery_title[$index] ?? '');
+                $media->setCustomProperty('caption', $request->gallery_caption[$index] ?? '');
+                $media->setCustomProperty('description', $request->gallery_description[$index] ?? '');
+                $media->save();
+            }
         }
 
         return redirect()->route('admin.trekking.index')
-            ->with('success', 'Trekking updated.');
+            ->with('success', 'Trekking updated successfully!');
     }
 
     public function destroy(Trekking $trekking)
@@ -183,9 +263,6 @@ class TrekkingController extends Controller
             ->with('success', 'Trekking deleted.');
     }
 
-    /**
-     * Generate a unique slug for Trekking
-     */
     private function generateUniqueSlug($title)
     {
         $slug = Str::slug($title);

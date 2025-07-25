@@ -10,6 +10,7 @@ use App\Models\Activity;
 use App\Models\Trekking;
 use App\Models\Post;
 use App\Models\ReviewRating;
+use App\Models\TourCategory;
 
 class HomeController extends Controller
 {
@@ -20,10 +21,16 @@ class HomeController extends Controller
             ->take(3)
             ->get();
 
-        $locations = Location::withCount('tours')
+        $locationsForSearch = Location::orderBy('name')
+            ->get();
+
+        // For Trending Locations section
+        $locationsForSection = Location::withCount('tours')
             ->orderBy('name')
             ->take(5)
             ->get();
+
+        $tourCategories = TourCategory::orderBy('name')->get();
 
         // -----------------------
         // TOURS
@@ -62,12 +69,14 @@ class HomeController extends Controller
             ->get();
 
         return view('front.index', [
-            'specialOffers' => $specialOffers,
-            'locations'     => $locations,
-            'tours'         => $tours,
-            'activities'    => $activities,
-            'trekking'      => $trekking,
-            'posts'         => $posts,
+            'specialOffers'   => $specialOffers,
+            'tourCategories'  => $tourCategories,
+            'tours'           => $tours,
+            'activities'      => $activities,
+            'trekking'        => $trekking,
+            'posts'           => $posts,
+            'locationsForSearch' => $locationsForSearch,
+            'locationsForSection' => $locationsForSection,
         ]);
     }
 

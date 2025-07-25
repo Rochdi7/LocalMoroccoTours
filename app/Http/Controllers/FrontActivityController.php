@@ -20,17 +20,19 @@ class FrontActivityController extends Controller
         $minPrice = Activity::min('base_price') ?? 0;
         $maxPrice = Activity::max('base_price') ?? 0;
 
-        $durations = [
-            '0-3 hours',
-            '3-5 hours',
-            '5-7 hours',
-            'Full day (7+ hours)',
-            'Multi-day'
-        ];
+        // Fetch distinct durations from DB to build the filter dropdown
+        $durations = Activity::query()
+            ->selectRaw('DISTINCT duration')
+            ->whereNotNull('duration')
+            ->orderByRaw(
+                "CAST(REPLACE(REPLACE(duration, ' Hours', ''), ' Hour', '') AS DECIMAL(4,1)) ASC"
+            )
+            ->pluck('duration')
+            ->toArray();
 
         $selectedCategories = $request->input('categories', []);
         $selectedDurations = $request->input('duration', []);
-        $selectedPriceRange = $request->input('price', [$minPrice, $maxPrice]);
+        $selectedPriceRange = array_map('floatval', $request->input('price', [$minPrice, $maxPrice]));
         $selectedSpecials = $request->input('specials', []);
         $selectedRatings = $request->input('ratings', []);
         $selectedLocations = $request->input('locations', []);
@@ -41,7 +43,17 @@ class FrontActivityController extends Controller
                 $query->whereIn('category_id', $selectedCategories);
             })
             ->when(!empty($selectedDurations), function ($query) use ($selectedDurations) {
-                $query->whereIn('duration', $selectedDurations);
+                $durationsNumeric = collect($selectedDurations)
+                    ->map(function ($duration) {
+                        return floatval(str_replace([' Hours', ' Hour'], '', $duration));
+                    })
+                    ->toArray();
+
+                $placeholders = implode(',', array_fill(0, count($durationsNumeric), '?'));
+                $query->whereRaw(
+                    "CAST(REPLACE(REPLACE(duration, ' Hours', ''), ' Hour', '') AS DECIMAL(4,1)) IN ($placeholders)",
+                    $durationsNumeric
+                );
             })
             ->when(!empty($selectedSpecials), function ($query) use ($selectedSpecials) {
                 if (in_array('free_cancellation', $selectedSpecials)) {
@@ -54,7 +66,9 @@ class FrontActivityController extends Controller
             ->when(!empty($selectedLocations), function ($query) use ($selectedLocations) {
                 $query->whereIn('location_id', $selectedLocations);
             })
-            ->whereBetween('base_price', $selectedPriceRange);
+            ->when($request->has('price'), function ($query) use ($selectedPriceRange) {
+                $query->whereBetween('base_price', $selectedPriceRange);
+            });
 
         switch ($sortBy) {
             case 'price_low_high':
@@ -77,8 +91,7 @@ class FrontActivityController extends Controller
                 break;
         }
 
-        $activities = $activities->paginate(10);
-
+        $activities = $activities->paginate(5);
         $activityIds = $activities->pluck('id');
 
         $activityRatings = \App\Models\ReviewRating::query()
@@ -93,14 +106,12 @@ class FrontActivityController extends Controller
             $activity->avg_rating = $activityRatings[$activity->id] ?? 0;
         }
 
-        // ✅ Filter by avg_rating after loading
         if (!empty($selectedRatings)) {
             $filtered = $activities->filter(function ($activity) use ($selectedRatings) {
                 return in_array(round($activity->avg_rating), $selectedRatings);
             })->values();
 
-            // Convert back to paginator
-            $activities = new LengthAwarePaginator(
+            $activities = new \Illuminate\Pagination\LengthAwarePaginator(
                 $filtered,
                 $filtered->count(),
                 $activities->perPage(),
@@ -122,13 +133,10 @@ class FrontActivityController extends Controller
         ));
     }
 
+
     public function show($slug)
     {
-        $activity = Activity::withCount(['reviews'])
-            ->with(['location', 'category', 'media'])
-            ->where('slug', $slug)
-            ->firstOrFail();
-
+        $activity = Activity::with(['location', 'category', 'media', 'itineraries'])->where('slug', $slug)->firstOrFail();
 
         $similarActivities = Activity::with(['location', 'category', 'media'])
             ->where('location_id', $activity->location_id)
@@ -221,7 +229,10 @@ class FrontActivityController extends Controller
 
         // Save reservation logic
 
-        return back()->with('success', 'Your reservation was submitted!');
+        return back()->with('success', [
+            'message' => 'Your reservation was submitted!',
+            'context' => 'reservation',
+        ]);
     }
 
     public function leaveReview(Request $request, $slug)
@@ -248,18 +259,20 @@ class FrontActivityController extends Controller
                 'email' => $validated['email'],
                 'title' => $validated['title'],
                 'comment' => $validated['comment'],
+                'rating' => collect($validated['ratings'])->avg(),
             ]);
 
             if ($request->hasFile('images')) {
                 $imagePaths = [];
                 foreach ($request->file('images') as $image) {
-                    $path = $image->store('reviews', 'public');
-                    $imagePaths[] = $path;
+                    if ($image && $image->isValid()) {
+                        $path = $image->store('reviews', 'public');
+                        $imagePaths[] = $path;
+                    }
                 }
                 $review->images = $imagePaths;
             }
 
-            $review->rating = collect($validated['ratings'])->avg();
             $review->save();
 
             foreach ($validated['categories'] as $categoryLabel) {
@@ -277,6 +290,9 @@ class FrontActivityController extends Controller
 
         return redirect()
             ->route('front.activities.show', $activity->slug)
-            ->with('success', 'Your review has been submitted!');
+            ->with('success', [
+                'message' => 'Your review has been submitted!',
+                'context' => 'review',
+            ]);
     }
 }
