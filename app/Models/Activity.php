@@ -38,6 +38,8 @@ class Activity extends Model implements HasMedia
         'languages' => 'array',
         'bestseller_flag' => 'boolean',
         'free_cancellation_flag' => 'boolean',
+        'content' => 'array',
+
     ];
 
     protected $attributes = [
