@@ -11,12 +11,49 @@ use App\Models\ReviewRating;
 use App\Models\RatingCategory;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Artesaos\SEOTools\Facades\SEOMeta;
+use Artesaos\SEOTools\Facades\OpenGraph;
+use Artesaos\SEOTools\Facades\JsonLd;
+use Illuminate\Support\Str;
 
 class FrontActivityController extends Controller
 {
 
     public function index(Request $request)
     {
+        // ✅ SEO meta for activity listing page
+        $title = 'Best Things to Do in Morocco | Activities & Experiences';
+        $description = 'Discover the top activities in Morocco including camel rides, hot air balloon experiences, cultural classes, and desert adventures. Book unforgettable moments today!';
+        $url = url()->current();
+        $image = asset('img/default-activity-cover.jpg'); // Replace with your site logo or generic activity banner
+
+        SEOMeta::setTitle($title);
+        SEOMeta::setDescription($description);
+        SEOMeta::addKeyword([
+            'Morocco activities',
+            'camel ride Marrakech',
+            'hot air balloon Morocco',
+            'cultural activities',
+            'things to do in Morocco',
+            'Agafay desert',
+            'Marrakech experiences',
+            'Moroccan food tours',
+            'excursions from Fes',
+            'local activities Morocco'
+        ]);
+
+        OpenGraph::setTitle($title);
+        OpenGraph::setDescription($description);
+        OpenGraph::setUrl($url);
+        OpenGraph::addImage($image);
+        OpenGraph::setType('website');
+
+        JsonLd::setTitle($title);
+        JsonLd::setDescription($description);
+        JsonLd::setUrl($url);
+        JsonLd::setType('ItemList');
+        JsonLd::addImage($image);
+
         $minPrice = Activity::min('base_price') ?? 0;
         $maxPrice = Activity::max('base_price') ?? 0;
 
@@ -102,9 +139,20 @@ class FrontActivityController extends Controller
             ->groupBy('reviews.reviewable_id')
             ->pluck('avg_rating', 'reviews.reviewable_id');
 
-        foreach ($activities as $activity) {
-            $activity->avg_rating = $activityRatings[$activity->id] ?? 0;
+        if (!empty($selectedRatings)) {
+            $filtered = $activities->filter(function ($singleActivity) use ($selectedRatings) {
+                return in_array(round($singleActivity->avg_rating), $selectedRatings);
+            })->values();
+
+            $activities = new LengthAwarePaginator(
+                $filtered,
+                $filtered->count(),
+                $activities->perPage(),
+                $activities->currentPage(),
+                ['path' => request()->url(), 'query' => request()->query()]
+            );
         }
+
 
         if (!empty($selectedRatings)) {
             $filtered = $activities->filter(function ($activity) use ($selectedRatings) {
@@ -136,8 +184,35 @@ class FrontActivityController extends Controller
 
     public function show($slug)
     {
-        $activity = Activity::with(['location', 'category', 'media', 'itineraries'])->where('slug', $slug)->firstOrFail();
+        $activity = Activity::with(['location', 'category', 'media', 'itineraries'])
+            ->where('slug', $slug)
+            ->firstOrFail();
 
+        // ✅ SEO meta tags
+        $title = $activity->title;
+        $description = Str::limit(strip_tags($activity->overview ?? $activity->description ?? ''), 160);
+        $image = $activity->getFirstMediaUrl('cover') ?: asset('img/default-cover.jpg');
+        $url = route('front.activities.show', $activity->slug);
+        $keywords = array_filter([$title, $activity->category->name ?? '', $activity->location->name ?? '']);
+
+        SEOMeta::setTitle($title);
+        SEOMeta::setDescription($description);
+        SEOMeta::addKeyword($keywords);
+
+        OpenGraph::setTitle($title);
+        OpenGraph::setDescription($description);
+        OpenGraph::setUrl($url);
+        OpenGraph::addImage($image);
+
+        JsonLd::setTitle($title);
+        JsonLd::setDescription($description);
+        JsonLd::addImage($image);
+        JsonLd::setType('TouristTrip');
+        JsonLd::setUrl($url);
+        JsonLd::addValue('@id', $url);
+
+
+        // 📌 Similar activities
         $similarActivities = Activity::with(['location', 'category', 'media'])
             ->where('location_id', $activity->location_id)
             ->where('id', '<>', $activity->id)
@@ -146,15 +221,17 @@ class FrontActivityController extends Controller
 
         $similarActivitiesCount = $similarActivities->count();
 
+        // 📊 Average rating
+        $activity->avg_rating = round($activity->reviews()->avg('rating'), 1) ?? 0;
+
+        // 🏷️ Category-based ratings
         $categories = RatingCategory::all();
 
         $overallRatings = $categories->map(function ($category) use ($activity) {
             $scores = ReviewRating::whereHas('review', function ($q) use ($activity) {
                 $q->where('reviewable_type', Activity::class)
                     ->where('reviewable_id', $activity->id);
-            })
-                ->where('rating_category_id', $category->id)
-                ->pluck('score');
+            })->where('rating_category_id', $category->id)->pluck('score');
 
             $avgScore = $scores->count() > 0
                 ? round($scores->avg(), 1)
@@ -168,6 +245,7 @@ class FrontActivityController extends Controller
             ];
         });
 
+        // 📝 Reviews
         $reviews = $activity->reviews()->latest()->get()->map(function ($review) {
             return (object)[
                 'id' => $review->id,
@@ -186,7 +264,6 @@ class FrontActivityController extends Controller
             ];
         });
 
-
         return view('front.activities.activities-details', compact(
             'activity',
             'similarActivities',
@@ -195,6 +272,7 @@ class FrontActivityController extends Controller
             'reviews'
         ));
     }
+
 
     private function getRatingText($score)
     {
