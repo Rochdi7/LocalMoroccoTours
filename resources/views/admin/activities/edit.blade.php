@@ -223,37 +223,40 @@
                                 <label for="group_size" class="form-label">Group Size</label>
                                 <input type="number" name="group_size"
                                     class="form-control @error('group_size') is-invalid @enderror"
-                                    value="{{ old('group_size', $activity->group_size) }}" required>
+                                    value="{{ old('group_size', $activity->group_size ?? 12) }}" placeholder="e.g. 12">
                                 <div class="invalid-feedback">
                                     @error('group_size')
                                         {{ $message }}
                                     @else
-                                        Max group size.
+                                        Optional. Max group size.
                                     @enderror
                                 </div>
                             </div>
+
 
                             {{-- Age Range --}}
                             <div class="mb-3 col-md-6">
                                 <label for="age_range" class="form-label">Age Range</label>
                                 <input type="text" name="age_range"
                                     class="form-control @error('age_range') is-invalid @enderror"
-                                    value="{{ old('age_range', $activity->age_range) }}" required>
+                                    value="{{ old('age_range', $activity->age_range ?? 'All ages') }}"
+                                    placeholder="e.g. 10-50 yrs or All ages">
                                 <div class="invalid-feedback">
                                     @error('age_range')
                                         {{ $message }}
                                     @else
-                                        Example: 10-50 yrs.
+                                        Optional. Example: 10-50 yrs or All ages.
                                     @enderror
                                 </div>
                             </div>
+
 
                             {{-- Base Price --}}
                             <div class="mb-3 col-md-6">
                                 <label for="base_price" class="form-label">Base Price (MAD)</label>
                                 <input type="number" step="0.01" name="base_price"
                                     class="form-control @error('base_price') is-invalid @enderror"
-                                    value="{{ old('base_price', $activity->base_price) }}" >
+                                    value="{{ old('base_price', $activity->base_price) }}">
                                 <div class="invalid-feedback">
                                     @error('base_price')
                                         {{ $message }}
@@ -357,47 +360,55 @@
                                 @enderror
                             </div>
 
-                           {{-- Itinerary --}}
-<div class="mb-3 col-md-12">
-    <label class="form-label">Itinerary</label>
-    <div id="itinerary-repeater">
-        @php
-            // Safe fallback if no itineraries exist
-            $itinerary = isset($activity) && $activity->relationLoaded('itineraries') && $activity->itineraries->count()
-                ? $activity->itineraries->map(function ($item) {
-                    return [
-                        'title' => $item->title,
-                        'content' => explode("\n\n", $item->content ?? ''),
-                    ];
-                })->toArray()
-                : [['title' => '', 'content' => ['']]];
-        @endphp
+                            {{-- Itinerary --}}
+                            <div class="mb-3 col-md-12">
+                                <label class="form-label">Itinerary</label>
+                                <div id="itinerary-repeater">
+                                    @php
+                                        $itinerary =
+                                            isset($activity) &&
+                                            $activity->relationLoaded('itineraries') &&
+                                            $activity->itineraries->count()
+                                                ? $activity->itineraries
+                                                    ->map(function ($item) {
+                                                        return [
+                                                            'title' => $item->title,
+                                                            'content' => is_array($item->content)
+                                                                ? $item->content
+                                                                : explode("\n\n", $item->content ?? ''),
+                                                        ];
+                                                    })
+                                                    ->toArray()
+                                                : [['title' => '', 'content' => ['']]];
+                                    @endphp
 
-        @foreach ($itinerary as $index => $day)
-            <div class="itinerary-day border rounded p-3 mb-3 bg-light position-relative">
-                <div class="mb-2">
-                    <label class="form-label">Day Title</label>
-                    <input type="text" name="itinerary[{{ $index }}][title]" class="form-control"
-                        value="{{ $day['title'] ?? '' }}">
-                </div>
+                                    @foreach ($itinerary as $index => $day)
+                                        <div class="itinerary-day border rounded p-3 mb-3 bg-light position-relative">
+                                            <div class="mb-2">
+                                                <label class="form-label">Day Title</label>
+                                                <input type="text" name="itinerary[{{ $index }}][title]"
+                                                    class="form-control" value="{{ $day['title'] ?? '' }}">
+                                            </div>
 
-                <div class="mb-2">
-                    <label class="form-label">Day Content (Multiple Paragraphs)</label>
-                    <textarea name="itinerary[{{ $index }}][content][]" rows="3" class="form-control"
-                        placeholder="Separate paragraphs with line breaks.">{{ implode("\n\n", $day['content'] ?? []) }}</textarea>
-                </div>
+                                            <div class="mb-2">
+                                                <label class="form-label">Day Content (Multiple Paragraphs)</label>
+                                                <textarea name="itinerary[{{ $index }}][content][]" rows="3" class="form-control"
+                                                    placeholder="Separate paragraphs with line breaks.">{{ implode("\n\n", $day['content'] ?? []) }}</textarea>
+                                            </div>
 
-                <button type="button" class="btn btn-danger btn-sm position-absolute top-0 end-0 m-2 remove-day">Remove</button>
-            </div>
-        @endforeach
-    </div>
+                                            <button type="button"
+                                                class="btn btn-danger btn-sm position-absolute top-0 end-0 m-2 remove-day">Remove</button>
+                                        </div>
+                                    @endforeach
+                                </div>
 
-    <button type="button" class="btn btn-outline-primary btn-sm" id="add-itinerary-day">+ Add Day</button>
+                                <button type="button" class="btn btn-outline-primary btn-sm" id="add-itinerary-day">+
+                                    Add Day</button>
 
-    @error('itinerary')
-        <div class="text-danger mt-1">{{ $message }}</div>
-    @enderror
-</div>
+                                @error('itinerary')
+                                    <div class="text-danger mt-1">{{ $message }}</div>
+                                @enderror
+                            </div>
 
 
                         </div>
@@ -484,11 +495,11 @@
         });
     </script>
     <script>
-        document.addEventListener('DOMContentLoaded', function () {
+        document.addEventListener('DOMContentLoaded', function() {
             let itineraryRepeater = document.getElementById('itinerary-repeater');
 
             // Add new day
-            document.getElementById('add-itinerary-day').addEventListener('click', function () {
+            document.getElementById('add-itinerary-day').addEventListener('click', function() {
                 let index = itineraryRepeater.querySelectorAll('.itinerary-day').length;
 
                 let template = document.createElement('div');
@@ -511,7 +522,7 @@
             });
 
             // Remove day
-            itineraryRepeater.addEventListener('click', function (e) {
+            itineraryRepeater.addEventListener('click', function(e) {
                 if (e.target.classList.contains('remove-day')) {
                     e.target.closest('.itinerary-day').remove();
                 }
