@@ -46,7 +46,7 @@
 | Frontend    | Blade + Tailwind CSS (optional custom theme) |
 | SEO Tools   | [artesaos/seotools](https://github.com/artesaos/seotools) |
 | Media       | [Spatie Laravel Media Library](https://spatie.be/docs/laravel-medialibrary) |
-| DB          | MySQL / MariaDB                           |
+| DB          | MySQL                          |
 | Admin Panel | Lightable Bootstrap Theme                 |
 | Maps        | Google Maps Embed                         |
 
